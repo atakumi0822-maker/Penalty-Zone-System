@@ -3,7 +3,8 @@ import './index.css';
 
 function App() {
   const [tesseractLoaded, setTesseractLoaded] = useState(false);
-  const tesseractRef = useRef(null);
+  // 修正：workerを直接管理することで認識を高速化・安定化させます
+  const workerRef = useRef(null);
   const [selectedDistance, setSelectedDistance] = useState(null);
   const [isAccordionOpen, setIsAccordionOpen] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -20,16 +21,27 @@ function App() {
   const timerIntervalsRef = useRef({});
   const loggedIds = useRef(new Set());
 
+  // 修正：AIエンジンの初期化をより詳細に行う
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    script.async = true;
-    script.onload = () => {
-      tesseractRef.current = window.Tesseract;
-      setTesseractLoaded(true);
+    const initTesseract = async () => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      script.async = true;
+      script.onload = async () => {
+        // TesseractのWorkerを作成し、数字のみを許可する設定を入れる
+        const worker = await window.Tesseract.createWorker('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: '0123456789', // 数字以外は無視
+        });
+        workerRef.current = worker;
+        setTesseractLoaded(true);
+      };
+      document.body.appendChild(script);
     };
-    document.body.appendChild(script);
-    return () => { if (document.body && document.body.contains(script)) document.body.removeChild(script); };
+    initTesseract();
+    return () => { 
+      if (workerRef.current) workerRef.current.terminate();
+    };
   }, []);
 
   const distances = [
@@ -110,35 +122,31 @@ function App() {
 
   const startDetection = () => {
     if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
-    // 読み取り間隔を1.5秒に短縮し、チャンスを増やします
+    // 1.5秒に1回スキャン
     detectionIntervalRef.current = setInterval(captureAndDetect, 1500);
   };
 
+  // 修正：AIの検知プロセスを強化
   const captureAndDetect = async () => {
-    if (!videoRef.current || !canvasRef.current || !tesseractRef.current || !isCameraActive) return;
+    if (!videoRef.current || !canvasRef.current || !workerRef.current || !isCameraActive) return;
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     
     if (videoRef.current.videoWidth > 0) {
-      // 1. 画像の解像度を調整
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
       
-      // 2. AIが読み取りやすいように画像加工（ここが重要！）
-      // 白黒化し、コントラストを上げることで数字を浮き立たせます
-      context.filter = 'contrast(150%) grayscale(100%)';
+      // 画像加工：コントラストを上げ、グレースケール化して数字をパキッとさせる
+      context.filter = 'contrast(180%) grayscale(100%) brightness(110%)';
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      context.filter = 'none';
       
       try {
-        // 3. AIに数字のみをターゲットにするよう指定
-        const result = await tesseractRef.current.recognize(canvas, 'eng', { 
-          tessedit_char_whitelist: '0123456789', // 数字以外は無視
-          tessjs_create_hocr: '0',
-          tessjs_create_tsv: '0'
-        });
+        // 事前に初期化したWorkerを使用して認識
+        const { data: { text } } = await workerRef.current.recognize(canvas);
 
-        // 4. 空白を除去して数字を抽出
-        const cleanedText = result.data.text.replace(/\s/g, '');
+        // 空白を除去して数字を抽出
+        const cleanedText = text.replace(/\s/g, '');
         const numbers = cleanedText.match(/\d+/);
         
         if (numbers && numbers[0].length >= 1) {
@@ -146,7 +154,7 @@ function App() {
           setDetectedNumber(bib);
           if (selectedDistance && !timers[bib]) startTimerForBib(bib);
           
-          // 検知したら表示を少し残して消す処理
+          // 吹き出しを1.5秒後に消す
           setTimeout(() => setDetectedNumber(''), 1500);
         }
       } catch (err) { console.error("OCR error:", err); }
@@ -266,13 +274,12 @@ function App() {
                         {detectedNumber} 番を検知！
                       </div>
                     )}
-                    {/* スキャン中であることを示すライン */}
                     <div className="absolute inset-0 pointer-events-none border-2 border-blue-400 opacity-20 animate-pulse"></div>
                   </>
                 )}
               </div>
               <canvas ref={canvasRef} style={{ display: 'none' }} />
-              <p className="text-[10px] text-gray-400 mt-2 text-center">※明るい場所で数字を中央に大きく映してください</p>
+              <p className="text-[10px] text-gray-400 mt-2 text-center">※数字を画面中央に1秒ほど固定して映してください</p>
             </div>
 
             <div className="space-y-2">
