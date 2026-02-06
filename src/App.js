@@ -73,33 +73,30 @@ function App() {
     }
     try {
       const constraints = {
-        video: { facingMode: { ideal: "environment" } },
+        video: { 
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
         audio: false
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       
-      // ここから「カメラを枠内に映す」ための重要修正
-      setIsCameraActive(true); // 先に表示枠(videoタグ)を出現させる
-
-      // 少しだけ待ってからvideoタグにストリームを流し込む
-      setTimeout(async () => {
-        if (videoRef.current) {
-          videoRef.current.muted = true;
-          videoRef.current.setAttribute("playsinline", "true");
-          videoRef.current.setAttribute("webkit-playsinline", "true");
-          videoRef.current.srcObject = stream;
-          try {
-            await videoRef.current.play();
-            startDetection();
-          } catch (e) {
-            console.error("Play error:", e);
-          }
-        }
-      }, 100);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // iOS Safari対策：属性をプログラムから直接セット
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current.setAttribute("webkit-playsinline", "true");
+        videoRef.current.muted = true;
+        
+        await videoRef.current.play();
+        setIsCameraActive(true);
+        startDetection();
+      }
     } catch (err) {
       console.error("Camera access error:", err);
-      alert("カメラの起動に失敗しました。ブラウザの設定でカメラを許可してください。");
+      alert("カメラの起動に失敗しました。設定を確認してください。");
     }
   };
 
@@ -227,22 +224,29 @@ function App() {
                 <button onClick={() => { if(manualInput) { startTimerForBib(manualInput); setManualInput(''); } }} className="bg-green-600 text-white px-4 rounded font-bold">追加</button>
               </div>
               
-              {!isCameraActive ? (
-                <button onClick={requestCameraPermission} className="w-full p-3 bg-blue-600 text-white rounded font-bold transition hover:bg-blue-700">📹 カメラ起動</button>
-              ) : (
-                <div className="relative bg-black rounded overflow-hidden" style={{ minHeight: '300px' }}>
-                  <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    muted 
-                    playsInline 
-                    className="w-full h-full" 
-                    style={{ minHeight: '300px', objectFit: 'cover', display: 'block' }}
-                  />
-                  <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold z-10">停止</button>
-                  {detectedNumber && <div className="absolute bottom-2 left-2 bg-blue-600 text-white p-2 rounded shadow-lg animate-bounce z-10">検出: {detectedNumber}</div>}
-                </div>
-              )}
+              <div className="relative bg-black rounded overflow-hidden" style={{ minHeight: '300px' }}>
+                {/* 常にvideo要素をDOMに置いておき、表示・非表示を切り替える */}
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  muted 
+                  playsInline 
+                  webkit-playsinline="true"
+                  className={`w-full h-full ${isCameraActive ? 'block' : 'hidden'}`}
+                  style={{ minHeight: '300px', objectFit: 'cover' }}
+                />
+                
+                {!isCameraActive ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                    <button onClick={requestCameraPermission} className="w-4/5 p-3 bg-blue-600 text-white rounded font-bold transition hover:bg-blue-700">📹 カメラ起動</button>
+                  </div>
+                ) : (
+                  <>
+                    <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold z-10">停止</button>
+                    {detectedNumber && <div className="absolute bottom-2 left-2 bg-blue-600 text-white p-2 rounded shadow-lg animate-bounce z-10">検出: {detectedNumber}</div>}
+                  </>
+                )}
+              </div>
               <canvas ref={canvasRef} style={{ display: 'none' }} />
             </div>
 
