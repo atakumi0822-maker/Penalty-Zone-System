@@ -3,7 +3,6 @@ import './index.css';
 
 function App() {
   const [tesseractLoaded, setTesseractLoaded] = useState(false);
-  // 修正：workerを直接管理することで認識を高速化・安定化させます
   const workerRef = useRef(null);
   const [selectedDistance, setSelectedDistance] = useState(null);
   const [isAccordionOpen, setIsAccordionOpen] = useState(false);
@@ -21,17 +20,16 @@ function App() {
   const timerIntervalsRef = useRef({});
   const loggedIds = useRef(new Set());
 
-  // 修正：AIエンジンの初期化をより詳細に行う
   useEffect(() => {
     const initTesseract = async () => {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
       script.async = true;
       script.onload = async () => {
-        // TesseractのWorkerを作成し、数字のみを許可する設定を入れる
         const worker = await window.Tesseract.createWorker('eng');
         await worker.setParameters({
           tessedit_char_whitelist: '0123456789', // 数字以外は無視
+          tessedit_pageseg_mode: '7',           // 1行のテキストとして扱う
         });
         workerRef.current = worker;
         setTesseractLoaded(true);
@@ -87,8 +85,8 @@ function App() {
       const constraints = {
         video: { 
           facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 1920 }, // 解像度を上げて読み取り精度を向上
+          height: { ideal: 1080 }
         },
         audio: false
       };
@@ -122,39 +120,38 @@ function App() {
 
   const startDetection = () => {
     if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
-    // 1.5秒に1回スキャン
-    detectionIntervalRef.current = setInterval(captureAndDetect, 1500);
+    detectionIntervalRef.current = setInterval(captureAndDetect, 1200); // 間隔を微調整
   };
 
-  // 修正：AIの検知プロセスを強化
   const captureAndDetect = async () => {
     if (!videoRef.current || !canvasRef.current || !workerRef.current || !isCameraActive) return;
+    const video = videoRef.current;
     const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
     
-    if (videoRef.current.videoWidth > 0) {
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+    if (video.videoWidth > 0) {
+      // 解析範囲の定義（中央の400x200ピクセルに絞る）
+      const scanWidth = 400;
+      const scanHeight = 200;
+      const sx = (video.videoWidth - scanWidth) / 2;
+      const sy = (video.videoHeight - scanHeight) / 2;
+
+      canvas.width = scanWidth;
+      canvas.height = scanHeight;
       
-      // 画像加工：コントラストを上げ、グレースケール化して数字をパキッとさせる
-      context.filter = 'contrast(180%) grayscale(100%) brightness(110%)';
-      context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      // 画像加工：白黒、コントラスト、明るさを調整
+      context.filter = 'contrast(200%) grayscale(100%) brightness(110%)';
+      context.drawImage(video, sx, sy, scanWidth, scanHeight, 0, 0, scanWidth, scanHeight);
       context.filter = 'none';
       
       try {
-        // 事前に初期化したWorkerを使用して認識
         const { data: { text } } = await workerRef.current.recognize(canvas);
-
-        // 空白を除去して数字を抽出
-        const cleanedText = text.replace(/\s/g, '');
-        const numbers = cleanedText.match(/\d+/);
+        const cleanedText = text.replace(/[^0-9]/g, ''); // 数字以外を完全に排除
         
-        if (numbers && numbers[0].length >= 1) {
-          const bib = numbers[0];
+        if (cleanedText.length >= 1) {
+          const bib = cleanedText;
           setDetectedNumber(bib);
           if (selectedDistance && !timers[bib]) startTimerForBib(bib);
-          
-          // 吹き出しを1.5秒後に消す
           setTimeout(() => setDetectedNumber(''), 1500);
         }
       } catch (err) { console.error("OCR error:", err); }
@@ -251,7 +248,7 @@ function App() {
                 <button onClick={() => { if(manualInput) { startTimerForBib(manualInput); setManualInput(''); } }} className="bg-green-600 text-white px-4 rounded font-bold">追加</button>
               </div>
               
-              <div className="relative bg-black rounded overflow-hidden" style={{ minHeight: '300px' }}>
+              <div className="relative bg-black rounded overflow-hidden aspect-video">
                 <video 
                   ref={videoRef} 
                   autoPlay 
@@ -259,27 +256,33 @@ function App() {
                   playsInline 
                   webkit-playsinline="true"
                   className={`w-full h-full ${isCameraActive ? 'block' : 'hidden'}`}
-                  style={{ minHeight: '300px', objectFit: 'cover' }}
+                  style={{ objectFit: 'cover' }}
                 />
                 
-                {!isCameraActive ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-                    <button onClick={requestCameraPermission} className="w-4/5 p-3 bg-blue-600 text-white rounded font-bold transition hover:bg-blue-700">📹 カメラ起動</button>
-                  </div>
-                ) : (
+                {isCameraActive && (
                   <>
+                    {/* 中央の読み取りガイド枠 */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-[200px] h-[100px] border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"></div>
+                      <div className="absolute top-[calc(50%+60px)] text-yellow-400 text-xs font-bold">枠内に数字を合わせてください</div>
+                    </div>
+                    
                     <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold z-10">停止</button>
                     {detectedNumber && (
                       <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full shadow-lg animate-bounce z-20 font-bold text-xl border-2 border-white">
                         {detectedNumber} 番を検知！
                       </div>
                     )}
-                    <div className="absolute inset-0 pointer-events-none border-2 border-blue-400 opacity-20 animate-pulse"></div>
                   </>
+                )}
+                {!isCameraActive && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                    <button onClick={requestCameraPermission} className="w-4/5 p-3 bg-blue-600 text-white rounded font-bold transition hover:bg-blue-700">📹 カメラ起動</button>
+                  </div>
                 )}
               </div>
               <canvas ref={canvasRef} style={{ display: 'none' }} />
-              <p className="text-[10px] text-gray-400 mt-2 text-center">※数字を画面中央に1秒ほど固定して映してください</p>
+              <p className="text-[10px] text-gray-400 mt-2 text-center">※明るい場所で、数字が黄色い枠に収まるように近づけてください</p>
             </div>
 
             <div className="space-y-2">
