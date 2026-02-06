@@ -72,8 +72,8 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 640 },
+          height: { ideal: 480 }
         },
         audio: false
       });
@@ -82,16 +82,13 @@ function App() {
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // iOS Safari対策: メタデータ読み込み後に再生
-        videoRef.current.onloadedmetadata = async () => {
-          try {
-            await videoRef.current.play();
-            setIsCameraActive(true);
-            startDetection();
-          } catch (e) {
-            console.error("Video play failed:", e);
-          }
-        };
+        // 強制的に再生を開始させる処理
+        videoRef.current.setAttribute("playsinline", true);
+        videoRef.current.muted = true;
+        videoRef.current.play();
+        
+        setIsCameraActive(true);
+        startDetection();
       }
     } catch (err) {
       console.error("Camera access error:", err);
@@ -117,7 +114,6 @@ function App() {
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     
-    // 実際のビデオサイズに合わせる
     if (videoRef.current.videoWidth > 0) {
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
@@ -222,19 +218,20 @@ function App() {
               </div>
               
               {!isCameraActive ? (
-                <button onClick={requestCameraPermission} className="w-full p-3 bg-blue-600 text-white rounded font-bold">📹 カメラ起動</button>
+                <button onClick={requestCameraPermission} className="w-full p-3 bg-blue-600 text-white rounded font-bold transition-all active:scale-95">📹 カメラ起動</button>
               ) : (
-                <div className="relative bg-black rounded overflow-hidden" style={{ minHeight: '300px', width: '100%' }}>
+                <div className="relative w-full rounded overflow-hidden shadow-inner bg-gray-200" style={{ aspectRatio: '16 / 9' }}>
                   <video 
                     ref={videoRef} 
                     autoPlay 
                     muted 
                     playsInline 
-                    className="w-full h-full"
-                    style={{ display: 'block', objectFit: 'cover', minHeight: '300px' }}
+                    className="w-full h-full object-cover"
+                    style={{ background: '#333' }}
                   />
-                  <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold z-10">停止</button>
-                  {detectedNumber && <div className="absolute bottom-2 left-2 bg-blue-600 text-white p-2 rounded shadow-lg z-10">検出: {detectedNumber}</div>}
+                  <div className="absolute inset-0 border-2 border-white/20 pointer-events-none"></div>
+                  <button onClick={stopCamera} className="absolute top-4 right-4 bg-red-600/80 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur-sm">停止</button>
+                  {detectedNumber && <div className="absolute bottom-4 left-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-xl font-bold animate-pulse">読み取り: {detectedNumber}</div>}
                 </div>
               )}
               <canvas ref={canvasRef} style={{ display: 'none' }} />
@@ -242,7 +239,7 @@ function App() {
 
             <div className="space-y-2">
               {Object.values(timers).map(timer => (
-                <div key={timer.bibNumber} className={`p-4 rounded-lg border-2 ${expiredTimers.has(timer.bibNumber) ? 'bg-red-500 text-white border-red-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+                <div key={timer.bibNumber} className={`p-4 rounded-lg border-2 ${expiredTimers.has(timer.bibNumber) ? 'bg-red-500 text-white border-red-700 shadow-xl scale-[1.02]' : 'bg-white border-gray-200 shadow-sm'} transition-all`}>
                   <div className="flex justify-between items-center">
                     <div>
                       <span className="text-xs uppercase opacity-70">BIB No.</span>
@@ -252,15 +249,14 @@ function App() {
                       <span className="text-xs uppercase opacity-70">Remaining</span>
                       <div className="text-4xl font-mono font-bold">{formatTime(timer.remaining)}</div>
                     </div>
-                    <button onClick={() => removeTimer(timer.bibNumber)} className={`ml-4 px-3 py-2 rounded font-bold text-xs ${expiredTimers.has(timer.bibNumber) ? 'bg-white text-red-600' : 'bg-gray-100 text-gray-500'}`}>解除</button>
+                    <button onClick={() => removeTimer(timer.bibNumber)} className={`ml-4 px-4 py-2 rounded-lg font-bold text-sm ${expiredTimers.has(timer.bibNumber) ? 'bg-white text-red-600 shadow-md' : 'bg-gray-100 text-gray-500'}`}>解除</button>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* 履歴テーブル */}
             <div className="bg-white rounded-lg shadow border overflow-hidden mt-8">
-              <div className="bg-gray-50 p-3 border-b font-bold">入出記録（履歴）</div>
+              <div className="bg-gray-50 p-3 border-b font-bold text-gray-700">入出記録（履歴）</div>
               <div className="max-h-64 overflow-y-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-gray-100 sticky top-0">
@@ -268,15 +264,15 @@ function App() {
                   </thead>
                   <tbody className="divide-y">
                     {recordHistory.map((log) => (
-                      <tr key={log.id} className="hover:bg-gray-50">
-                        <td className="p-3 font-mono">{log.displayTime}</td>
-                        <td className="p-3 font-bold">{log.bibNumber}</td>
+                      <tr key={log.id} className="hover:bg-gray-50 transition">
+                        <td className="p-3 font-mono text-gray-500">{log.displayTime}</td>
+                        <td className="p-3 font-bold text-gray-800">{log.bibNumber}</td>
                         <td className="p-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${log.type === 'entry' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                          <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${log.type === 'entry' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                             {log.type === 'entry' ? '入場' : '退場'}
                           </span>
                         </td>
-                        <td className="p-3">{log.distance}km</td>
+                        <td className="p-3 text-gray-500">{log.distance}km</td>
                       </tr>
                     ))}
                   </tbody>
