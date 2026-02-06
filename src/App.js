@@ -20,13 +20,11 @@ function App() {
   const timerIntervalsRef = useRef({});
   const loggedIds = useRef(new Set());
 
-  // Tesseract.js の読み込みと初期化
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
     script.async = true;
-    script.onload = async () => {
-      // 読み込み完了後、ワーカーを作成
+    script.onload = () => {
       tesseractRef.current = window.Tesseract;
       setTesseractLoaded(true);
     };
@@ -97,7 +95,7 @@ function App() {
       }
     } catch (err) {
       console.error("Camera access error:", err);
-      alert("カメラの起動に失敗しました。");
+      alert("カメラの起動に失敗しました。設定を確認してください。");
     }
   };
 
@@ -108,56 +106,50 @@ function App() {
     if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
     setIsCameraActive(false);
     if (videoRef.current) videoRef.current.srcObject = null;
-    setDetectedNumber('');
   };
 
   const startDetection = () => {
     if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
-    // 1.5秒に1回スキャン（2秒より少し速く）
+    // 読み取り間隔を1.5秒に短縮し、チャンスを増やします
     detectionIntervalRef.current = setInterval(captureAndDetect, 1500);
   };
 
   const captureAndDetect = async () => {
     if (!videoRef.current || !canvasRef.current || !tesseractRef.current || !isCameraActive) return;
-    
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     
     if (videoRef.current.videoWidth > 0) {
-      // 読み取り精度向上のため、少し画像を加工
+      // 1. 画像の解像度を調整
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
       
-      // 画像をキャンバスに描画
-      context.filter = 'contrast(150%) grayscale(100%)'; // コントラストを上げ、白黒にする
+      // 2. AIが読み取りやすいように画像加工（ここが重要！）
+      // 白黒化し、コントラストを上げることで数字を浮き立たせます
+      context.filter = 'contrast(150%) grayscale(100%)';
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      context.filter = 'none'; // 元に戻す
-
+      
       try {
-        // AIに解析を依頼（英語＋数字限定モード）
-        const { data: { text } } = await tesseractRef.current.recognize(canvas, 'eng', {
-            // 数字だけを探すように指示（超重要）
-            tessedit_char_whitelist: '0123456789',
-            // OCRエンジンのモードを指定
-            tessjs_create_hocr: '0',
-            tessjs_create_tsv: '0'
+        // 3. AIに数字のみをターゲットにするよう指定
+        const result = await tesseractRef.current.recognize(canvas, 'eng', { 
+          tessedit_char_whitelist: '0123456789', // 数字以外は無視
+          tessjs_create_hocr: '0',
+          tessjs_create_tsv: '0'
         });
 
-        // 読み取ったテキストから数字を抽出
-        const numbers = text.replace(/\s/g, '').match(/\d+/);
-        if (numbers) {
+        // 4. 空白を除去して数字を抽出
+        const cleanedText = result.data.text.replace(/\s/g, '');
+        const numbers = cleanedText.match(/\d+/);
+        
+        if (numbers && numbers[0].length >= 1) {
           const bib = numbers[0];
-          // 2桁以上の数字のみ有効とする（誤検知防止）
-          if (bib.length >= 1) {
-            setDetectedNumber(bib);
-            if (selectedDistance && !timers[bib]) {
-                startTimerForBib(bib);
-            }
-          }
+          setDetectedNumber(bib);
+          if (selectedDistance && !timers[bib]) startTimerForBib(bib);
+          
+          // 検知したら表示を少し残して消す処理
+          setTimeout(() => setDetectedNumber(''), 1500);
         }
-      } catch (err) { 
-        console.error("AI OCR error:", err); 
-      }
+      } catch (err) { console.error("OCR error:", err); }
     }
   };
 
@@ -167,13 +159,11 @@ function App() {
     const startTime = new Date();
     const entryId = `entry-${bibNumber}-${Date.now()}`;
     const endTime = Date.now() + duration * 1000;
-    
     setRecordHistory(prev => [{ bibNumber, type: 'entry', displayTime: formatDateTime(startTime), distance: selectedDistance, id: entryId }, ...prev]);
     setTimers(prev => ({
       ...prev,
       [bibNumber]: { bibNumber, duration, remaining: duration, endTime, distance: selectedDistance, isExpired: false }
     }));
-    
     timerIntervalsRef.current[bibNumber] = setInterval(() => {
       setTimers(prev => {
         const timer = prev[bibNumber];
@@ -222,35 +212,23 @@ function App() {
       <style>{`
         .expired-alert { animation: pulse 1s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-        .scan-line {
-          position: absolute;
-          width: 100%;
-          height: 2px;
-          background: rgba(59, 130, 246, 0.5);
-          box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
-          animation: scan 3s linear infinite;
-        }
-        @keyframes scan {
-          0% { top: 0%; }
-          100% { top: 100%; }
-        }
       `}</style>
 
       <div className="bg-white shadow-sm border-b-2 border-blue-600 p-4">
-        <h1 className="text-xl font-bold text-center text-blue-800">競歩ペナルティーゾーン管理</h1>
+        <h1 className="text-xl font-bold text-center">競歩ペナルティーゾーン管理</h1>
       </div>
 
       <div className="max-w-4xl mx-auto p-4 space-y-6">
-        <div className="bg-white rounded-lg shadow border overflow-hidden border-blue-100">
-          <button onClick={() => setIsAccordionOpen(!isAccordionOpen)} className="w-full p-4 bg-blue-600 text-white flex justify-between font-bold items-center">
-            {selectedDistance ? `距離: ${selectedDistance}km (${getTimerDuration(selectedDistance)}秒)` : '1. 距離を選択してください'}
+        <div className="bg-white rounded-lg shadow border overflow-hidden">
+          <button onClick={() => setIsAccordionOpen(!isAccordionOpen)} className="w-full p-4 bg-blue-600 text-white flex justify-between font-bold">
+            {selectedDistance ? `距離: ${selectedDistance}km (${getTimerDuration(selectedDistance)}秒)` : '距離を選択してください'}
             <span>{isAccordionOpen ? '▲' : '▼'}</span>
           </button>
           {isAccordionOpen && (
-            <div className="p-4 grid grid-cols-2 gap-2 bg-blue-50">
+            <div className="p-4 grid grid-cols-2 gap-2">
               {distances.map(d => (
-                <button key={d.value} onClick={() => selectDistance(d.value)} className="p-3 bg-white border border-blue-200 rounded-lg font-bold text-blue-700 hover:bg-blue-100 transition">
-                  {d.label}
+                <button key={d.value} onClick={() => selectDistance(d.value)} className="p-3 bg-gray-100 rounded hover:bg-gray-200">
+                  {d.label} ({getTimerDuration(d.value)}秒)
                 </button>
               ))}
             </div>
@@ -259,77 +237,90 @@ function App() {
 
         {selectedDistance && (
           <div className="space-y-4">
-            <div className="bg-white p-4 rounded-xl shadow-md border-2 border-blue-50">
+            <div className="bg-white p-4 rounded-lg shadow border">
               <div className="flex gap-2 mb-4">
-                <input type="text" inputMode="numeric" value={manualInput} onChange={(e) => setManualInput(e.target.value.replace(/\D/g, ''))} placeholder="手動入力" className="flex-1 border-2 border-gray-100 p-2 rounded-lg text-lg outline-none focus:border-blue-400" />
-                <button onClick={() => { if(manualInput) { startTimerForBib(manualInput); setManualInput(''); } }} className="bg-green-600 text-white px-6 rounded-lg font-bold shadow-sm">追加</button>
+                <input type="text" value={manualInput} onChange={(e) => setManualInput(e.target.value.replace(/\D/g, ''))} placeholder="ゼッケン番号" className="flex-1 border p-2 rounded" />
+                <button onClick={() => { if(manualInput) { startTimerForBib(manualInput); setManualInput(''); } }} className="bg-green-600 text-white px-4 rounded font-bold">追加</button>
               </div>
               
-              <div className="relative bg-black rounded-xl overflow-hidden shadow-inner" style={{ minHeight: '300px' }}>
-                <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full ${isCameraActive ? 'block' : 'hidden'}`} style={{ minHeight: '300px', objectFit: 'cover' }} />
+              <div className="relative bg-black rounded overflow-hidden" style={{ minHeight: '300px' }}>
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  muted 
+                  playsInline 
+                  webkit-playsinline="true"
+                  className={`w-full h-full ${isCameraActive ? 'block' : 'hidden'}`}
+                  style={{ minHeight: '300px', objectFit: 'cover' }}
+                />
                 
                 {!isCameraActive ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-                    <button onClick={requestCameraPermission} className="bg-blue-600 text-white px-8 py-3 rounded-full font-bold shadow-lg animate-pulse">📹 AIカメラを起動</button>
+                    <button onClick={requestCameraPermission} className="w-4/5 p-3 bg-blue-600 text-white rounded font-bold transition hover:bg-blue-700">📹 カメラ起動</button>
                   </div>
                 ) : (
                   <>
-                    <div className="scan-line"></div>
-                    <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600/80 text-white px-4 py-1 rounded-full text-xs font-bold z-20 backdrop-blur-sm">停止</button>
-                    <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-[10px] z-20">AI稼働中...</div>
-                    
+                    <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold z-10">停止</button>
                     {detectedNumber && (
-                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full shadow-2xl font-black text-2xl border-2 border-white animate-bounce z-30">
+                      <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full shadow-lg animate-bounce z-20 font-bold text-xl border-2 border-white">
                         {detectedNumber} 番を検知！
                       </div>
                     )}
+                    {/* スキャン中であることを示すライン */}
+                    <div className="absolute inset-0 pointer-events-none border-2 border-blue-400 opacity-20 animate-pulse"></div>
                   </>
                 )}
               </div>
               <canvas ref={canvasRef} style={{ display: 'none' }} />
-              <p className="text-[10px] text-gray-400 mt-2 text-center">※ゼッケンを明るい場所で、画面中央に近づけてください</p>
+              <p className="text-[10px] text-gray-400 mt-2 text-center">※明るい場所で数字を中央に大きく映してください</p>
             </div>
 
-            <div className="space-y-3">
-              {Object.values(timers).length === 0 && <p className="text-center text-gray-400 py-10 bg-white rounded-lg border-2 border-dashed border-gray-100">現在、ペナルティー中の選手はいません</p>}
+            <div className="space-y-2">
+              {Object.values(timers).length === 0 && <p className="text-center text-gray-400 py-4 italic">現在待機中の選手はいません</p>}
               {Object.values(timers).map(timer => (
-                <div key={timer.bibNumber} className={`p-5 rounded-2xl border-l-[12px] shadow-sm transition-all ${expiredTimers.has(timer.bibNumber) ? 'bg-red-600 text-white border-red-800 scale-[1.02]' : 'bg-white border-blue-600'}`}>
+                <div key={timer.bibNumber} className={`p-4 rounded-lg border-2 transition-all ${expiredTimers.has(timer.bibNumber) ? 'bg-red-500 text-white expired-alert border-red-700 shadow-lg' : 'bg-white border-gray-200 shadow-sm'}`}>
                   <div className="flex justify-between items-center">
                     <div>
-                      <div className="text-[10px] font-bold opacity-70">BIB NUMBER</div>
-                      <div className="text-4xl font-black">{timer.bibNumber}</div>
+                      <span className="text-xs uppercase opacity-70">BIB No.</span>
+                      <div className="text-3xl font-black">{timer.bibNumber}</div>
                     </div>
-                    <div className="text-right flex-1 px-4">
-                      <div className="text-[10px] font-bold opacity-70">REMAINING</div>
-                      <div className="text-5xl font-mono font-black">{formatTime(timer.remaining)}</div>
+                    <div className="text-right">
+                      <span className="text-xs uppercase opacity-70">Remaining</span>
+                      <div className="text-4xl font-mono font-bold leading-none">{formatTime(timer.remaining)}</div>
                     </div>
-                    <button onClick={() => removeTimer(timer.bibNumber)} className={`px-4 py-2 rounded-xl font-bold text-sm shadow-sm ${expiredTimers.has(timer.bibNumber) ? 'bg-white text-red-600' : 'bg-gray-100 text-gray-500'}`}>解除</button>
+                    <button onClick={() => removeTimer(timer.bibNumber)} className={`ml-4 px-3 py-2 rounded font-bold text-xs ${expiredTimers.has(timer.bibNumber) ? 'bg-white text-red-600' : 'bg-gray-100 text-gray-500'}`}>解除</button>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-8">
-              <div className="bg-gray-50 p-3 border-b font-bold text-gray-600 flex justify-between items-center px-4">
-                <span>📊 通過ログ（最新50件）</span>
+            <div className="bg-white rounded-lg shadow border overflow-hidden mt-8">
+              <div className="bg-gray-50 p-3 border-b font-bold text-gray-700 flex justify-between items-center">
+                <span>入出記録（履歴）</span>
+                <span className="text-xs font-normal text-gray-400">最新50件</span>
               </div>
-              <div className="max-h-60 overflow-y-auto">
+              <div className="max-h-64 overflow-y-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-50 text-gray-400 sticky top-0">
-                    <tr><th className="p-3 font-medium">時刻</th><th className="p-3 font-medium">ゼッケン</th><th className="p-3 font-medium">状態</th></tr>
+                  <thead className="bg-gray-100 sticky top-0">
+                    <tr><th className="p-3">時刻</th><th className="p-3">ゼッケン</th><th className="p-3">種別</th><th className="p-3">距離</th></tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {recordHistory.map((log) => (
-                      <tr key={log.id} className="hover:bg-blue-50 transition-colors">
-                        <td className="p-3 font-mono text-gray-400">{log.displayTime}</td>
-                        <td className="p-3 font-bold text-gray-700">{log.bibNumber}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold text-white ${log.type === 'entry' ? 'bg-green-500' : log.type === 'manual_exit' ? 'bg-orange-400' : 'bg-blue-500'}`}>
-                            {log.type === 'entry' ? '入場' : log.type === 'manual_exit' ? '途中解除' : '退場'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody className="divide-y">
+                    {recordHistory.length === 0 ? (
+                      <tr><td colSpan="4" className="p-4 text-center text-gray-400">まだ記録はありません</td></tr>
+                    ) : (
+                      recordHistory.map((log) => (
+                        <tr key={log.id} className="hover:bg-gray-50 transition">
+                          <td className="p-3 font-mono text-gray-500">{log.displayTime}</td>
+                          <td className="p-3 font-bold text-gray-800">{log.bibNumber}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${log.type === 'entry' ? 'bg-green-100 text-green-700' : log.type === 'manual_exit' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                              {log.type === 'entry' ? '入場' : log.type === 'manual_exit' ? '途中解除' : '退場'}
+                            </span>
+                          </td>
+                          <td className="p-3 text-gray-500">{log.distance}km</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
