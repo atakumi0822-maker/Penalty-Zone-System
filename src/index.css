@@ -1,0 +1,17 @@
+/* Tailwind CSS を直接読み込む */
+@import url('https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css');
+
+/* アニメーション */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.expired-alert {
+  animation: pulse 1s infinite !important;
+}
+
+/* 動作確認用のテスト：これが効けばCSSは読み込まれています */
+body {
+  background-color: #f3f4f6 !important;
+  margin: 0;
+}
