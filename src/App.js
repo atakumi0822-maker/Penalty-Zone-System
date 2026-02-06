@@ -229,7 +229,15 @@ function App() {
                 <button onClick={requestCameraPermission} className="w-full p-3 bg-blue-600 text-white rounded font-bold transition hover:bg-blue-700">📹 カメラ起動</button>
               ) : (
                 <div className="relative">
-                  <video ref={videoRef} autoPlay muted playsInline className="w-full rounded border bg-black" />
+                  {/* ここにスタイルを追加しました */}
+                  <video 
+                    ref={videoRef} 
+                    autoPlay 
+                    muted 
+                    playsInline 
+                    className="w-full rounded border bg-black" 
+                    style={{ minHeight: '300px', objectFit: 'cover' }}
+                  />
                   <button onClick={stopCamera} className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold">停止</button>
                   {detectedNumber && <div className="absolute bottom-2 left-2 bg-blue-600 text-white p-2 rounded shadow-lg animate-bounce">検出: {detectedNumber}</div>}
                 </div>
