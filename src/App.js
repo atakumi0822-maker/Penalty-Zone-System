@@ -20,6 +20,7 @@ function App() {
   const timerIntervalsRef = useRef({});
   const loggedIds = useRef(new Set());
 
+  // Tesseract.js の読み込み
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
@@ -67,32 +68,43 @@ function App() {
            date.getSeconds().toString().padStart(2, '0');
   };
 
+  // --- カメラ起動：インライン再生を強制する最強設定 ---
   const requestCameraPermission = async () => {
+    if (streamRef.current) {
+        stopCamera();
+    }
+    
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const constraints = {
         video: { 
-          facingMode: { ideal: "environment" },
+          facingMode: { ideal: "environment" }, // 背面カメラ
           width: { ideal: 640 },
           height: { ideal: 480 }
         },
         audio: false
-      });
+      };
       
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        // 強制的に再生を開始させる処理
-        videoRef.current.setAttribute("playsinline", true);
+        // 重要：srcObjectを入れる前に再生設定を固める
         videoRef.current.muted = true;
-        videoRef.current.play();
+        videoRef.current.setAttribute("autoplay", "");
+        videoRef.current.setAttribute("muted", "");
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current.setAttribute("webkit-playsinline", "true"); // iOS Safari用
         
+        videoRef.current.srcObject = stream;
+        
+        // 再生が開始されるまで待つ
+        await videoRef.current.play();
         setIsCameraActive(true);
         startDetection();
       }
     } catch (err) {
       console.error("Camera access error:", err);
-      alert("カメラの起動に失敗しました。");
+      alert("カメラの起動に失敗しました。ブラウザのカメラアクセスを許可してください。");
     }
   };
 
@@ -102,6 +114,7 @@ function App() {
     }
     if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
     setIsCameraActive(false);
+    if (videoRef.current) videoRef.current.srcObject = null;
   };
 
   const startDetection = () => {
@@ -188,21 +201,21 @@ function App() {
 
   return (
     <div className={`min-h-screen transition-colors duration-500 ${expiredTimers.size > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-      <div className="bg-white shadow-sm border-b-2 border-blue-600 p-4">
-        <h1 className="text-xl font-bold text-center">競歩ペナルティーゾーン管理</h1>
+      <div className="bg-white shadow-sm border-b-2 border-blue-600 p-4 sticky top-0 z-50">
+        <h1 className="text-xl font-bold text-center text-blue-800">競歩ペナルティー管理</h1>
       </div>
 
       <div className="max-w-4xl mx-auto p-4 space-y-6">
-        <div className="bg-white rounded-lg shadow border overflow-hidden">
-          <button onClick={() => setIsAccordionOpen(!isAccordionOpen)} className="w-full p-4 bg-blue-600 text-white flex justify-between font-bold">
-            {selectedDistance ? `距離: ${selectedDistance}km (${getTimerDuration(selectedDistance)}秒)` : '距離を選択してください'}
-            <span>{isAccordionOpen ? '▲' : '▼'}</span>
+        <div className="bg-white rounded-lg shadow-md border overflow-hidden">
+          <button onClick={() => setIsAccordionOpen(!isAccordionOpen)} className="w-full p-4 bg-blue-600 text-white flex justify-between font-bold items-center">
+            {selectedDistance ? `距離: ${selectedDistance}km` : '1. まず距離を選択'}
+            <span className="text-xl">{isAccordionOpen ? '▲' : '▼'}</span>
           </button>
           {isAccordionOpen && (
-            <div className="p-4 grid grid-cols-2 gap-2">
+            <div className="p-4 grid grid-cols-2 gap-3">
               {distances.map(d => (
-                <button key={d.value} onClick={() => selectDistance(d.value)} className="p-3 bg-gray-100 rounded hover:bg-gray-200">
-                  {d.label} ({getTimerDuration(d.value)}秒)
+                <button key={d.value} onClick={() => selectDistance(d.value)} className="p-4 bg-gray-50 border-2 border-gray-200 rounded-xl font-bold">
+                  {d.label}<br/><span className="text-xs text-gray-500 font-normal">{getTimerDuration(d.value)}秒</span>
                 </button>
               ))}
             </div>
@@ -211,68 +224,75 @@ function App() {
 
         {selectedDistance && (
           <div className="space-y-4">
-            <div className="bg-white p-4 rounded-lg shadow border">
+            <div className="bg-white p-4 rounded-xl shadow-lg border-2 border-blue-100">
               <div className="flex gap-2 mb-4">
-                <input type="text" value={manualInput} onChange={(e) => setManualInput(e.target.value.replace(/\D/g, ''))} placeholder="ゼッケン番号" className="flex-1 border p-2 rounded" />
-                <button onClick={() => { if(manualInput) { startTimerForBib(manualInput); setManualInput(''); } }} className="bg-green-600 text-white px-4 rounded font-bold">追加</button>
+                <input type="number" inputMode="numeric" value={manualInput} onChange={(e) => setManualInput(e.target.value)} placeholder="ゼッケン" className="flex-1 border-2 border-gray-200 p-3 rounded-lg text-lg outline-none" />
+                <button onClick={() => { if(manualInput) { startTimerForBib(manualInput); setManualInput(''); } }} className="bg-green-600 text-white px-6 rounded-lg font-bold shadow-md">追加</button>
               </div>
               
-              {!isCameraActive ? (
-                <button onClick={requestCameraPermission} className="w-full p-3 bg-blue-600 text-white rounded font-bold transition-all active:scale-95">📹 カメラ起動</button>
-              ) : (
-                <div className="relative w-full rounded overflow-hidden shadow-inner bg-gray-200" style={{ aspectRatio: '16 / 9' }}>
-                  <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    muted 
-                    playsInline 
-                    className="w-full h-full object-cover"
-                    style={{ background: '#333' }}
-                  />
-                  <div className="absolute inset-0 border-2 border-white/20 pointer-events-none"></div>
-                  <button onClick={stopCamera} className="absolute top-4 right-4 bg-red-600/80 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur-sm">停止</button>
-                  {detectedNumber && <div className="absolute bottom-4 left-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-xl font-bold animate-pulse">読み取り: {detectedNumber}</div>}
-                </div>
-              )}
-              <canvas ref={canvasRef} style={{ display: 'none' }} />
+              {/* カメラ表示エリア */}
+              <div className="relative w-full bg-black rounded-xl overflow-hidden shadow-2xl" style={{ aspectRatio: '4 / 3' }}>
+                {!isCameraActive ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                     <button onClick={requestCameraPermission} className="bg-blue-600 text-white px-8 py-4 rounded-full font-bold shadow-xl animate-bounce">
+                       📹 カメラを起動
+                     </button>
+                  </div>
+                ) : (
+                  <div className="w-full h-full">
+                    <video 
+                      ref={videoRef} 
+                      autoPlay 
+                      muted 
+                      playsInline 
+                      webkit-playsinline="true"
+                      className="w-full h-full object-cover"
+                      style={{ background: '#000' }}
+                    />
+                    <button onClick={stopCamera} className="absolute top-4 right-4 bg-red-600/80 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg">停止</button>
+                    {detectedNumber && <div className="absolute bottom-4 left-4 bg-blue-700/90 text-white px-4 py-2 rounded-lg font-black text-xl shadow-2xl">読み取り: {detectedNumber}</div>}
+                  </div>
+                )}
+              </div>
+              <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            <div className="space-y-2">
+            <div className="grid gap-3">
               {Object.values(timers).map(timer => (
-                <div key={timer.bibNumber} className={`p-4 rounded-lg border-2 ${expiredTimers.has(timer.bibNumber) ? 'bg-red-500 text-white border-red-700 shadow-xl scale-[1.02]' : 'bg-white border-gray-200 shadow-sm'} transition-all`}>
+                <div key={timer.bibNumber} className={`p-4 rounded-xl border-4 ${expiredTimers.has(timer.bibNumber) ? 'bg-red-600 text-white border-yellow-400' : 'bg-white border-blue-500 shadow-md'}`}>
                   <div className="flex justify-between items-center">
                     <div>
-                      <span className="text-xs uppercase opacity-70">BIB No.</span>
-                      <div className="text-3xl font-black">{timer.bibNumber}</div>
+                      <span className="text-xs font-bold opacity-80 uppercase">BIB No.</span>
+                      <div className="text-4xl font-black">{timer.bibNumber}</div>
                     </div>
                     <div className="text-right">
-                      <span className="text-xs uppercase opacity-70">Remaining</span>
-                      <div className="text-4xl font-mono font-bold">{formatTime(timer.remaining)}</div>
+                      <span className="text-xs font-bold opacity-80 uppercase">Remaining</span>
+                      <div className="text-5xl font-mono font-black">{formatTime(timer.remaining)}</div>
                     </div>
-                    <button onClick={() => removeTimer(timer.bibNumber)} className={`ml-4 px-4 py-2 rounded-lg font-bold text-sm ${expiredTimers.has(timer.bibNumber) ? 'bg-white text-red-600 shadow-md' : 'bg-gray-100 text-gray-500'}`}>解除</button>
+                    <button onClick={() => removeTimer(timer.bibNumber)} className={`ml-4 px-4 py-3 rounded-lg font-black text-sm ${expiredTimers.has(timer.bibNumber) ? 'bg-white text-red-600' : 'bg-gray-100 text-gray-500'}`}>解除</button>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="bg-white rounded-lg shadow border overflow-hidden mt-8">
-              <div className="bg-gray-50 p-3 border-b font-bold text-gray-700">入出記録（履歴）</div>
-              <div className="max-h-64 overflow-y-auto">
+            {/* 履歴 */}
+            <div className="bg-white rounded-xl shadow border overflow-hidden mt-8">
+              <div className="bg-gray-800 p-3 font-bold text-white text-center">履歴</div>
+              <div className="max-h-60 overflow-y-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-100 sticky top-0">
-                    <tr><th className="p-3">時刻</th><th className="p-3">ゼッケン</th><th className="p-3">種別</th><th className="p-3">距離</th></tr>
+                  <thead className="bg-gray-100 font-bold">
+                    <tr><th className="p-3">時刻</th><th className="p-3">BIB</th><th className="p-3">状態</th></tr>
                   </thead>
                   <tbody className="divide-y">
                     {recordHistory.map((log) => (
-                      <tr key={log.id} className="hover:bg-gray-50 transition">
-                        <td className="p-3 font-mono text-gray-500">{log.displayTime}</td>
-                        <td className="p-3 font-bold text-gray-800">{log.bibNumber}</td>
+                      <tr key={log.id} className="hover:bg-blue-50">
+                        <td className="p-3 text-gray-400 font-mono">{log.displayTime}</td>
+                        <td className="p-3 font-black">{log.bibNumber}</td>
                         <td className="p-3">
-                          <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${log.type === 'entry' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                          <span className={`px-2 py-1 rounded text-[10px] font-bold text-white ${log.type === 'entry' ? 'bg-green-500' : 'bg-blue-500'}`}>
                             {log.type === 'entry' ? '入場' : '退場'}
                           </span>
                         </td>
-                        <td className="p-3 text-gray-500">{log.distance}km</td>
                       </tr>
                     ))}
                   </tbody>
